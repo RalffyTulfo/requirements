@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0f6b6f">
+<link rel="manifest" href="manifest.webmanifest">
+<title>Requirements</title>
+<style>
+:root{--ink:#14202b;--paper:#f3f5f7;--card:#fff;--line:#d5dbe1;--acc:#0f6b6f;--mute:#5b6773;color-scheme:light dark}
+@media(prefers-color-scheme:dark){:root{--ink:#e8edf1;--paper:#10171d;--card:#18222b;--line:#2c3945;--mute:#94a1ad}}
+*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.4 system-ui,sans-serif;padding:env(safe-area-inset-top) 0 90px}
+header{display:flex;justify-content:space-between;align-items:center;padding:18px 16px 8px}
+h1{font-size:26px;margin:0;font-weight:700}
+#st{border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:99px;padding:6px 12px;font-size:13px}
+#list{padding:8px 12px;display:grid;gap:8px}
+.row{display:flex;gap:12px;align-items:center;padding:12px;border-radius:12px;color:#14202b;background:#fff;border:1px solid var(--line)}
+.row.late{background:#ea9999}.row.today{background:#f9cb9c}.row.tmrw{background:#fff2cc}.row.done{background:#d9ead3}
+.row input{width:24px;height:24px;flex:none;accent-color:#0f6b6f}
+.row .m{flex:1;min-width:0}.row b{display:block;overflow-wrap:anywhere}.row small{opacity:.8}
+.empty{text-align:center;color:var(--mute);padding:40px 20px}
+#fab{position:fixed;right:18px;bottom:calc(18px + env(safe-area-inset-bottom));background:var(--acc);color:#fff;border:0;border-radius:99px;padding:16px 22px;font-size:17px;font-weight:600}
+dialog{width:min(94vw,460px);border:0;border-radius:16px;padding:18px;background:var(--card);color:var(--ink)}
+dialog::backdrop{background:#0008}
+dialog h2{margin:0 0 10px;font-size:20px}dialog p{margin:14px 0 6px;color:var(--mute);font-size:14px}
+#nm{width:100%;font-size:17px;padding:12px;border:1px solid var(--line);border-radius:10px;background:var(--paper);color:var(--ink)}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chip{border:1px solid var(--line);background:var(--paper);color:var(--ink);border-radius:99px;padding:9px 14px;font-size:15px}
+.chip.on{background:var(--acc);border-color:var(--acc);color:#fff}
+#dp{font-size:15px;padding:8px;border-radius:10px;border:1px solid var(--line);background:var(--paper);color:var(--ink)}
+.act{display:flex;gap:10px;margin-top:18px}.act button{flex:1;padding:13px;border-radius:12px;border:1px solid var(--line);font-size:16px;background:var(--paper);color:var(--ink)}
+.act #sv{background:var(--acc);border-color:var(--acc);color:#fff;font-weight:600}.act #sv:disabled{opacity:.4}
+</style></head><body>
+<header><h1>Requirements</h1><button id="st"></button></header>
+<div id="list"></div>
+<button id="fab">+ Add</button>
+<dialog id="dg"><h2 id="ttl"></h2>
+<input id="nm" placeholder="Requirement name" autocomplete="off">
+<p>Subject</p><div class="chips" id="cs"></div>
+<p>Deadline <span id="dl"></span></p><div class="chips" id="cd"></div>
+<div style="margin-top:8px"><input type="date" id="dp"></div>
+<p>Status</p><div class="chips" id="cz"></div>
+<div class="act"><button id="cx">Cancel</button><button id="sv">Save</button></div></dialog>
+<script>
+const SUBJ=["🔬 Chemistry","✖️ Mathematics","✖️ Research","✖️ Engineering","📝 English","🇵🇭 Filipino","📚 Social Science","🏠 Homeroom","😇 Guidance"];
+const $=s=>document.querySelector(s),LS=localStorage;
+let items=JSON.parse(LS.items||"[]"),url=LS.url||"",busy=false,dr={};
+const save=()=>LS.items=JSON.stringify(items);
+const iso=d=>new Date(d.getTime()-d.getTimezoneOffset()*6e4).toISOString().slice(0,10);
+const plus=n=>{const d=new Date();d.setDate(d.getDate()+n);return iso(d)};
+const diff=s=>Math.round((new Date(s+"T00:00")-new Date(iso(new Date())+"T00:00"))/864e5);
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const nice=s=>new Date(s+"T00:00").toLocaleDateString("en-PH",{weekday:"short",month:"short",day:"numeric",year:"numeric"});
+function info(i){if(i.done)return["done","🎉 Completed"];const n=diff(i.date);return n<0?["late","Past due"]:n==0?["today","Due today"]:n==1?["tmrw","Due tomorrow"]:["",n+" days left"]}
+function render(){
+  const l=[...items].sort((a,b)=>a.date<b.date?-1:a.date>b.date?1:0);
+  $("#list").innerHTML=l.length?l.map(i=>{const[c,t]=info(i);return`<div class="row ${c}" data-id="${i.id}"><input type="checkbox" ${i.done?"checked":""}><div class="m"><b>${esc(i.name)}</b><small>${esc(i.subj)} · ${nice(i.date)} · ${t}</small></div></div>`}).join(""):'<div class="empty">No requirements yet. Tap + Add.</div>';
+  setStatus();
+}
+function setStatus(m){const n=items.filter(i=>i.dirty).length;$("#st").textContent=m||(!url?"Set up sync":n?n+" waiting to sync":"Synced ✓")}
+async function api(method,body){
+  const c=new AbortController(),t=setTimeout(()=>c.abort(),9000);
+  try{const r=await fetch(url,{method,signal:c.signal,headers:body?{"Content-Type":"application/json"}:{},body:body&&JSON.stringify(body)});
+    if(!r.ok)throw new Error(r.status);return await r.json()}finally{clearTimeout(t)}
+}
+async function sync(){
+  if(busy||!url)return;busy=true;setStatus("Syncing…");
+  try{
+    const dirty=items.filter(i=>i.dirty),sent=dirty.map(i=>[i.id,i.rev]);
+    if(dirty.length){
+      await api("POST",{items:dirty.map(i=>({id:i.id,subject:i.subj,details:i.name,deadline:i.date,status:i.done}))});
+      sent.forEach(([id,rev])=>{const i=items.find(x=>x.id==id);if(i&&i.rev==rev)delete i.dirty});
+    }
+    const res=await api("GET");
+    if(Array.isArray(res.rows)){
+      const keep=items.filter(i=>i.dirty),ids=new Set(keep.map(i=>i.id));
+      items=[...keep,...res.rows.filter(r=>!ids.has(r.id)&&r.deadline).map(r=>({id:r.id,name:r.details,subj:r.subject,date:r.deadline,done:r.status,rev:0}))];
+    }
+    save();
+  }catch(e){}
+  busy=false;render();
+}
+function chips(el,opts,cur,pick){
+  el.innerHTML=opts.map(([v,t])=>`<button type="button" class="chip ${v===cur?"on":""}" data-v="${esc(v)}">${esc(t)}</button>`).join("");
+  el.onclick=e=>{const b=e.target.closest(".chip");if(b){pick(b.dataset.v);draw()}};
+}
+function draw(){
+  chips($("#cs"),SUBJ.map(s=>[s,s]),dr.subj,v=>dr.subj=v);
+  chips($("#cd"),[[plus(0),"Today"],[plus(1),"Tomorrow"],[plus(3),"In 3 days"],[plus(7),"Next week"]],dr.date,v=>dr.date=v);
+  chips($("#cz"),[["0","Pending"],["1","Done"]],dr.done?"1":"0",v=>dr.done=v=="1");
+  $("#dl").textContent=dr.date?"· "+nice(dr.date):"";$("#dp").value=dr.date||"";
+  $("#sv").disabled=!($("#nm").value.trim()&&dr.subj&&dr.date);
+}
+function open(i){
+  dr=i?{...i}:{name:"",subj:"",date:"",done:false};
+  $("#ttl").textContent=i?"Edit requirement":"New requirement";$("#nm").value=dr.name;draw();$("#dg").showModal();
+}
+$("#fab").onclick=()=>open();
+$("#nm").oninput=draw;$("#dp").onchange=e=>{dr.date=e.target.value;draw()};
+$("#cx").onclick=()=>$("#dg").close();
+$("#sv").onclick=()=>{
+  dr.name=$("#nm").value.trim();
+  const i=items.find(x=>x.id==dr.id);
+  if(i)Object.assign(i,dr,{rev:i.rev+1,dirty:true});
+  else items.push({...dr,id:"r"+Date.now().toString(36)+Math.random().toString(36).slice(2,6),rev:1,dirty:true});
+  save();render();$("#dg").close();sync();
+};
+$("#list").onclick=e=>{
+  const r=e.target.closest(".row");if(!r)return;const i=items.find(x=>x.id==r.dataset.id);
+  if(e.target.matches("input")){i.done=e.target.checked;i.rev++;i.dirty=true;save();render();sync()}else open(i);
+};
+$("#st").onclick=()=>{const u=prompt("n8n webhook URL (ends with /webhook/your-path):",url);if(u!==null){url=u.trim();LS.url=url;sync();render()}};
+addEventListener("online",sync);document.addEventListener("visibilitychange",()=>!document.hidden&&sync());
+setInterval(sync,30000);
+if("serviceWorker"in navigator)navigator.serviceWorker.register("sw.js");
+render();sync();
+</script></body></html>
