@@ -25,7 +25,7 @@ dialog h2{margin:0 0 10px;font-size:20px}dialog p{margin:14px 0 6px;color:var(--
 .chips{display:flex;flex-wrap:wrap;gap:8px}
 .chip{border:1px solid var(--line);background:var(--paper);color:var(--ink);border-radius:99px;padding:9px 14px;font-size:15px}
 .chip.on{background:var(--acc);border-color:var(--acc);color:#fff}
-#dp{font-size:15px;padding:8px;border-radius:10px;border:1px solid var(--line);background:var(--paper);color:var(--ink)}
+#dp,#tp{font-size:15px;padding:8px;border-radius:10px;border:1px solid var(--line);background:var(--paper);color:var(--ink)}
 .act{display:flex;gap:10px;margin-top:18px}.act button{flex:1;padding:13px;border-radius:12px;border:1px solid var(--line);font-size:16px;background:var(--paper);color:var(--ink)}
 .act #sv{background:var(--acc);border-color:var(--acc);color:#fff;font-weight:600}.act #sv:disabled{opacity:.4}
 </style></head><body>
@@ -36,9 +36,9 @@ dialog h2{margin:0 0 10px;font-size:20px}dialog p{margin:14px 0 6px;color:var(--
 <input id="nm" placeholder="Requirement name" autocomplete="off">
 <p>Subject</p><div class="chips" id="cs"></div>
 <p>Deadline <span id="dl"></span></p><div class="chips" id="cd"></div>
-<div style="margin-top:8px"><input type="date" id="dp"></div>
+<div style="margin-top:8px;display:flex;gap:8px"><input type="date" id="dp"><input type="time" id="tp" value="23:59"></div>
 <p>Status</p><div class="chips" id="cz"></div>
-<div class="act"><button id="cx">Cancel</button><button id="sv">Save</button></div></dialog>
+<div class="act"><button id="dx" hidden style="color:#b3261e">Delete</button><button id="cx">Cancel</button><button id="sv">Save</button></div></dialog>
 <script>
 const SUBJ=["🔬 Chemistry","✖️ Mathematics","✖️ Research","✖️ Engineering","📝 English","🇵🇭 Filipino","📚 Social Science","🏠 Homeroom","😇 Guidance"];
 const $=s=>document.querySelector(s),LS=localStorage;
@@ -49,10 +49,17 @@ const plus=n=>{const d=new Date();d.setDate(d.getDate()+n);return iso(d)};
 const diff=s=>Math.round((new Date(s+"T00:00")-new Date(iso(new Date())+"T00:00"))/864e5);
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const nice=s=>new Date(s+"T00:00").toLocaleDateString("en-PH",{weekday:"short",month:"short",day:"numeric",year:"numeric"});
-function info(i){if(i.done)return["done","🎉 Completed"];const n=diff(i.date);return n<0?["late","Past due"]:n==0?["today","Due today"]:n==1?["tmrw","Due tomorrow"]:["",n+" days left"]}
+const T=i=>i.time||"23:59",k=i=>i.date+"T"+T(i),hm=t=>new Date("2000-01-01T"+t).toLocaleTimeString("en-PH",{hour:"numeric",minute:"2-digit"});
+function info(i){
+  if(i.done)return["done","🎉 Completed"];
+  const ms=new Date(k(i))-Date.now(),n=diff(i.date);
+  if(ms<0)return["late","Past due"];
+  if(n==0)return["today",ms<36e5?Math.max(1,Math.round(ms/6e4))+" min left":Math.round(ms/36e5)+" hrs left"];
+  return n==1?["tmrw","Due tomorrow"]:["",n+" days left"];
+}
 function render(){
-  const l=[...items].sort((a,b)=>a.date<b.date?-1:a.date>b.date?1:0);
-  $("#list").innerHTML=l.length?l.map(i=>{const[c,t]=info(i);return`<div class="row ${c}" data-id="${i.id}"><input type="checkbox" ${i.done?"checked":""}><div class="m"><b>${esc(i.name)}</b><small>${esc(i.subj)} · ${nice(i.date)} · ${t}</small></div></div>`}).join(""):'<div class="empty">No requirements yet. Tap + Add.</div>';
+  const l=items.filter(i=>!i.del).sort((a,b)=>k(a)<k(b)?-1:k(a)>k(b)?1:0);
+  $("#list").innerHTML=l.length?l.map(i=>{const[c,t]=info(i);return`<div class="row ${c}" data-id="${i.id}"><input type="checkbox" ${i.done?"checked":""}><div class="m"><b>${esc(i.name)}</b><small>${esc(i.subj)} · ${nice(i.date)}, ${hm(T(i))} · ${t}</small></div></div>`}).join(""):'<div class="empty">No requirements yet. Tap + Add.</div>';
   setStatus();
 }
 function setStatus(m){const n=items.filter(i=>i.dirty).length;$("#st").textContent=m||(!url?"Set up sync":n?n+" waiting to sync":"Synced ✓")}
@@ -66,13 +73,13 @@ async function sync(){
   try{
     const dirty=items.filter(i=>i.dirty),sent=dirty.map(i=>[i.id,i.rev]);
     if(dirty.length){
-      await api("POST",{items:dirty.map(i=>({id:i.id,subject:i.subj,details:i.name,deadline:i.date,status:i.done}))});
-      sent.forEach(([id,rev])=>{const i=items.find(x=>x.id==id);if(i&&i.rev==rev)delete i.dirty});
+      await api("POST",{items:dirty.filter(i=>!i.del).map(i=>({id:i.id,subject:i.subj,details:i.name,deadline:k(i),status:i.done})),deletes:dirty.filter(i=>i.del).map(i=>i.id)});
+      sent.forEach(([id,rev])=>{const i=items.find(x=>x.id==id);if(i&&i.rev==rev){if(i.del)items=items.filter(x=>x!==i);else delete i.dirty}});
     }
     const res=await api("GET");
     if(Array.isArray(res.rows)){
       const keep=items.filter(i=>i.dirty),ids=new Set(keep.map(i=>i.id));
-      items=[...keep,...res.rows.filter(r=>!ids.has(r.id)&&r.deadline).map(r=>({id:r.id,name:r.details,subj:r.subject,date:r.deadline,done:r.status,rev:0}))];
+      items=[...keep,...res.rows.filter(r=>!ids.has(r.id)&&r.deadline).map(r=>{const[d,t]=r.deadline.split("T");return{id:r.id,name:r.details,subj:r.subject,date:d,time:t||"23:59",done:r.status,rev:0}})];
     }
     save();
   }catch(e){}
@@ -86,21 +93,26 @@ function draw(){
   chips($("#cs"),SUBJ.map(s=>[s,s]),dr.subj,v=>dr.subj=v);
   chips($("#cd"),[[plus(0),"Today"],[plus(1),"Tomorrow"],[plus(3),"In 3 days"],[plus(7),"Next week"]],dr.date,v=>dr.date=v);
   chips($("#cz"),[["0","Pending"],["1","Done"]],dr.done?"1":"0",v=>dr.done=v=="1");
-  $("#dl").textContent=dr.date?"· "+nice(dr.date):"";$("#dp").value=dr.date||"";
+  $("#dl").textContent=dr.date?"· "+nice(dr.date)+", "+hm(T(dr)):"";$("#dp").value=dr.date||"";$("#tp").value=T(dr);
   $("#sv").disabled=!($("#nm").value.trim()&&dr.subj&&dr.date);
 }
 function open(i){
-  dr=i?{...i}:{name:"",subj:"",date:"",done:false};
+  dr=i?{...i,time:T(i)}:{name:"",subj:"",date:"",time:"23:59",done:false};$("#dx").hidden=!i;
   $("#ttl").textContent=i?"Edit requirement":"New requirement";$("#nm").value=dr.name;draw();$("#dg").showModal();
 }
 $("#fab").onclick=()=>open();
-$("#nm").oninput=draw;$("#dp").onchange=e=>{dr.date=e.target.value;draw()};
+$("#nm").oninput=draw;$("#dp").onchange=e=>{dr.date=e.target.value;draw()};$("#tp").onchange=e=>{dr.time=e.target.value||"23:59";draw()};
 $("#cx").onclick=()=>$("#dg").close();
 $("#sv").onclick=()=>{
-  dr.name=$("#nm").value.trim();
+  dr.name=$("#nm").value.trim();dr.time=dr.time||"23:59";
   const i=items.find(x=>x.id==dr.id);
   if(i)Object.assign(i,dr,{rev:i.rev+1,dirty:true});
   else items.push({...dr,id:"r"+Date.now().toString(36)+Math.random().toString(36).slice(2,6),rev:1,dirty:true});
+  save();render();$("#dg").close();sync();
+};
+$("#dx").onclick=()=>{
+  if(!confirm("Delete this requirement? It will also be removed from your sheet."))return;
+  const i=items.find(x=>x.id==dr.id);if(i)Object.assign(i,{del:true,dirty:true,rev:i.rev+1});
   save();render();$("#dg").close();sync();
 };
 $("#list").onclick=e=>{
